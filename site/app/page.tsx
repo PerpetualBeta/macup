@@ -92,8 +92,8 @@ export default function Home() {
         </div>
 
         <Window title="MacUp" mobileCard className="w-full lg:w-[1440px] lg:max-w-full">
-          <div className="grid gap-7 p-1 lg:min-h-[520px] lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)] lg:gap-16 lg:px-10 lg:py-12">
-            <div className="flex flex-col lg:justify-center">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-7 p-1 lg:min-h-[520px] lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)] lg:gap-16 lg:px-10 lg:py-12">
+            <div className="flex min-w-0 flex-col lg:justify-center">
               <div className="flex items-center gap-3">
                 <Logo size={52} className="lg:size-14" />
                 <span className="text-2xl font-semibold tracking-tight lg:text-3xl">{site.name}</span>
@@ -139,7 +139,7 @@ export default function Home() {
                 <Credit />
               </nav>
             </div>
-            <dl className="border-foreground/10 grid content-center gap-4 border-t pt-6 sm:grid-cols-2 lg:gap-8 lg:border-0 lg:pt-0">
+            <dl className="border-foreground/10 grid min-w-0 content-center gap-4 border-t pt-6 sm:grid-cols-[repeat(2,minmax(0,1fr))] lg:gap-8 lg:border-0 lg:pt-0">
               {points.map((p) => (
                 <div key={p.title} className="flex gap-3 lg:flex-col lg:gap-3">
                   <span className="bg-muted text-foreground/80 mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg lg:size-10 lg:rounded-xl">
@@ -157,7 +157,7 @@ export default function Home() {
 
         {/* Phone footer links (on desktop they live inside the window). */}
         <nav
-          className="flex justify-center gap-5 pt-2 text-sm text-white/85 drop-shadow lg:hidden"
+          className="flex flex-wrap justify-center gap-x-5 gap-y-2 pt-2 text-sm text-white/85 drop-shadow lg:hidden"
           aria-label="Links"
         >
           {links.map((l) => (
