@@ -165,6 +165,54 @@ stub hang 'sleep 30' npm
 out=$(run hang MACUP_MANAGER_TIMEOUT=1 zsh "$SCAN" npm 2>/dev/null)
 check "a hung manager times out" "$out" "took longer than 1s and was stopped"
 
+# --- Homebrew: a refresh that stalls is dropped, and the packages on disk still answer -------------
+stub brewstall '[[ "$1" == "--version" ]] && { echo "Homebrew 9.9.9"; exit 0 }
+[[ "$1" == "--prefix" ]] && { echo /nonexistent; exit 0 }
+[[ -z "${HOMEBREW_NO_AUTO_UPDATE:-}" ]] && { echo "==> Auto-updating Homebrew..." >&2; sleep 30 }
+cat <<JSON
+{
+  "formulae": [
+    {
+      "name": "jq",
+      "installed_versions": [
+        "1.6"
+      ],
+      "current_version": "1.7.1"
+    }
+  ],
+  "casks": []
+}
+JSON' brew
+started=$(date +%s)
+out=$(run brewstall MACUP_BREW_TIMEOUT=1 MACUP_MANAGER_TIMEOUT=20 zsh "$SCAN" brew 2>/dev/null)
+took=$(( $(date +%s) - started ))
+check "brew: a stalled auto-update still reports ok" "$out" "M	brew	ok"
+check "brew: and lists what is outdated from the data on disk" "$out" "P	brew	jq	1.6	1.7.1	formula"
+(( took < 10 )) && ok "brew: the stalled refresh is stopped, not waited out (${took}s)" \
+  || bad "brew: the stalled refresh is stopped, not waited out" "took ${took}s"
+
+# --- macOS: a busy update daemon falls back to the list macOS keeps in its preferences -------------
+stub sustall 'sleep 30' softwareupdate
+plist=$(mktemp -d)/su.plist
+cat > "$plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>RecommendedUpdates</key><array>
+  <dict><key>Display Name</key><string>macOS Tahoe 26.7.1</string><key>Display Version</key><string>26.7.1</string></dict>
+  <dict><key>Display Version</key><string>27.0</string><key>Display Name</key><string>Safari</string></dict>
+</array></dict></plist>
+PLIST
+if command -v plutil >/dev/null; then   # macOS only; the Linux bench has no softwareupdate either
+  started=$(date +%s)
+  out=$(run sustall MACUP_MACOS_TIMEOUT=1 MACUP_SOFTWAREUPDATE_PLIST="$plist" MACUP_MANAGER_TIMEOUT=20 zsh "$SCAN" macos 2>/dev/null)
+  took=$(( $(date +%s) - started ))
+  check "macOS: a busy update daemon still reports ok" "$out" "M	macos	ok"
+  check "macOS: updates come from the cached list" "$out" "P	macos	macOS Tahoe 26.7.1"
+  check "macOS: whatever order the keys are in" "$out" "P	macos	Safari	?	27.0	os"
+  (( took < 10 )) && ok "macOS: the busy daemon is not waited out (${took}s)" \
+    || bad "macOS: the busy daemon is not waited out" "took ${took}s"
+fi
+
 print ""
 print -P "%F{blue}scan script:%f $pass passed, $fail failed"
 (( fail == 0 ))

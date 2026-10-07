@@ -70,6 +70,26 @@ self_version() {
   print -r -- "$v"
 }
 have()   { command -v "$1" >/dev/null 2>&1; }
+# Stops a process and everything it started: a manager often hands the slow part to a child (brew to
+# git, curl or ruby), and stopping only the parent leaves that child running.
+kill_tree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done; kill -TERM "$1" 2>/dev/null }
+# bounded <seconds> <command line> — evaluates the command line, stopping it after <seconds> and
+# returning 124. Output goes through a file rather than a pipe, so a child left behind cannot keep the
+# caller waiting for the end of it. Used where a manager has a cheaper answer to fall back on, before
+# the scan-wide deadline would throw the whole answer away.
+bounded() {
+  local out; out=$(mktemp "$tmp/bounded.XXXXXX")
+  ( eval "$2" ) > "$out" &
+  local worker=$!
+  ( trap - EXIT TERM INT HUP; sleep "$1"; : > "$out.timeout"; kill_tree $worker ) >/dev/null 2>&1 &
+  local watchdog=$! rc=0
+  wait $worker 2>/dev/null || rc=$?
+  kill_tree $watchdog; wait $watchdog 2>/dev/null
+  cat "$out"
+  [[ -e "$out.timeout" ]] && rc=124
+  rm -f "$out" "$out.timeout"
+  return $rc
+}
 # check_cmd <manager> [key=value ...] — the command that lists this manager's updates: the user's
 # replacement when there is one, else the default. Its output is read by the parser below it, so a
 # replacement is expected to keep the shape the manager's own command produces.
@@ -107,8 +127,13 @@ jstr() { sed -nE "s/^[[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\
 scan_brew() {
   have brew || { header brew missing; return; }
   local greedy=""; [[ "${MACUP_BREW_GREEDY:-0}" == 1 ]] && greedy="--greedy"
-  local out; local err="$tmp/brew.err"
-  out=$(eval "$(check_cmd brew "greedy=$greedy")" 2>"$err") || { header brew error "brew outdated failed$(vtag brew): $(errline "$err")"; return; }
+  local out rc=0 cmd; local err="$tmp/brew.err"; cmd=$(check_cmd brew "greedy=$greedy")
+  # `outdated` first refreshes Homebrew itself and every tap that is a git checkout, at most once a
+  # day. That refresh can stall on the network; the packages already on disk still answer the
+  # question, so a refresh that runs long is dropped rather than the whole result.
+  out=$(bounded "${MACUP_BREW_TIMEOUT:-120}" "$cmd" 2>"$err") || rc=$?
+  (( rc == 124 )) && { rc=0; out=$(export HOMEBREW_NO_AUTO_UPDATE=1; eval "$cmd" 2>"$err") || rc=$?; }
+  (( rc == 0 )) || { header brew error "brew outdated failed$(vtag brew): $(errline "$err")"; return; }
   header brew ok
   local prefix; prefix=$(brew --prefix 2>/dev/null)
   brew_time() {  # $1 kind, $2 name, $3 installed version
@@ -325,10 +350,23 @@ scan_mas() {
 }
 
 
+# The updates macOS last found, from its own preferences, in the shape `softwareupdate -l` prints.
+softwareupdate_cached() {
+  local plist=${MACUP_SOFTWAREUPDATE_PLIST:-/Library/Preferences/com.apple.SoftwareUpdate.plist} item title version
+  plutil -extract RecommendedUpdates json -o - "$plist" 2>/dev/null | awk '{ gsub(/\},\{/, "}\n{"); print }' | \
+  while IFS= read -r item; do
+    title=$(printf '%s\n' "$item" | sed -nE 's/.*"Display Name":"([^"]*)".*/\1/p')
+    version=$(printf '%s\n' "$item" | sed -nE 's/.*"Display Version":"([^"]*)".*/\1/p')
+    [[ -n "$title" && -n "$version" ]] && printf '\tTitle: %s, Version: %s,\n' "$title" "$version"
+  done
+}
+
 scan_macos() {
   have softwareupdate || { header macos missing; return; }
-  # --no-scan reads the list macOS refreshes in the background, so this stays fast.
-  local out; out=$(eval "$(check_cmd macos)" 2>/dev/null) || { header macos ok; return; }
+  # --no-scan reads the list macOS refreshes in the background, but it still waits its turn with the
+  # update daemon, and while that is busy downloading or checking it can wait for minutes. The same
+  # list is kept in a preferences file anyone can read, so a long wait falls back to that.
+  local out; out=$(bounded "${MACUP_MACOS_TIMEOUT:-30}" "$(check_cmd macos)" 2>/dev/null) || out=$(softwareupdate_cached)
   header macos ok
   local current; current=$(sw_vers -productVersion 2>/dev/null)
   # "	Title: macOS Sequoia 15.6, Version: 15.6, Size: ..., Recommended: YES, Action: restart,"
