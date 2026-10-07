@@ -123,8 +123,12 @@ export default function Home() {
               <div className="mt-3 sm:max-w-[424px]">
                 <InstallCommand />
               </div>
+              <p className="text-muted-foreground mt-2 text-center text-sm sm:text-left">
+                Also in the terminal:{" "}
+                <code className="text-foreground font-mono text-[13px]">macup upgrade</code>
+              </p>
               <nav
-                className="text-muted-foreground mt-auto hidden gap-4 pt-8 text-sm lg:flex"
+                className="text-muted-foreground mt-auto hidden gap-4 pt-7 text-sm lg:flex"
                 aria-label="Links"
               >
                 {links.map((l) => (
