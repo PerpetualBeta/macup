@@ -73,7 +73,8 @@ APP="$EXPORT/MacUp.app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")" == "$VERSION" ]] || { echo "exported app version mismatch" >&2; exit 1; }
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist")" == "$BUILD" ]] || { echo "exported app build mismatch" >&2; exit 1; }
 codesign --verify --deep --strict "$APP"
-lipo "$APP/Contents/MacOS/MacUp" -verify_arch arm64 x86_64
+# One architecture per call: the lipo in Xcode 27 rejects several after -verify_arch.
+for arch in arm64 x86_64; do lipo "$APP/Contents/MacOS/MacUp" -verify_arch "$arch" || { echo "not universal: no $arch" >&2; exit 1; }; done
 # Exercise the exported, signed Release binary itself before distributing it.
 MACUP_SCREENSHOTS="$PWD/$OUT/validation" "$APP/Contents/MacOS/MacUp"
 [[ "$(find "$OUT/validation" -name '*.png' | wc -l | tr -d ' ')" == 6 ]] || { echo "release render failed" >&2; exit 1; }
