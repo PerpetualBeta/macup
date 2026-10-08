@@ -110,8 +110,11 @@ mkdir -p "$OUT/sparkle"; cp "$ZIP" "$OUT/sparkle/"
 
 # GitHub release: dmg for people, zip for Sparkle, appcast for the feed URL.
 [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" && -z "$(git status --porcelain)" ]] || { echo "source changed during the build" >&2; exit 1; }
+# Hand-written notes when there are some: most changes land on main directly, so notes generated from
+# pull requests would leave them out.
+notes=(--generate-notes); [[ -f "release-notes/$VERSION.md" ]] && notes=(--notes-file "release-notes/$VERSION.md")
 gh release create "v$VERSION" "$DMG" "$ZIP" "$OUT/appcast.xml" --repo "$REPO" \
-  --target "$SOURCE_COMMIT" --title "MacUp $VERSION" --generate-notes
+  --target "$SOURCE_COMMIT" --title "MacUp $VERSION" "${notes[@]}"
 
 # Homebrew tap: point the cask at this release.
 SHA=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
