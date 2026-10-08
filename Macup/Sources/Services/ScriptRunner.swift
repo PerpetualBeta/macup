@@ -89,6 +89,18 @@ enum ScriptRunner {
             environment: env, timeout: 3600, label: "The \(manager.title) update", onOutput: onOutput)
     }
 
+    /// The command the upgrade script would run for one package, read from its dry run, so what is
+    /// handed to Terminal is exactly what MacUp would have run.
+    static func upgradeCommand(manager: Manager, argument: String, brewGreedy: Bool) async -> String? {
+        guard let url = scriptURL("macup-upgrade") else { return nil }
+        var env = await environment(brewGreedy: brewGreedy)
+        env["MACUP_DRY_RUN"] = "1"
+        let result = try? await Subprocess.run(
+            executable: "/bin/zsh", arguments: [url.path, manager.rawValue, argument],
+            environment: env, timeout: 30, label: "Reading the update command")
+        return result?.stdout.split(separator: "\n").first { $0.hasPrefix("$ ") }.map { String($0.dropFirst(2)) }
+    }
+
     static func remove(
         pkg: OutdatedPackage, brewGreedy: Bool,
         onOutput: @Sendable @escaping (String) -> Void

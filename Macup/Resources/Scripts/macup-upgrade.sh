@@ -102,12 +102,18 @@ case "$manager" in
       for n in "${names[@]}"; do
         # Names may carry their kind ("cask:ghostty", "formula:jq") so a formula and a cask sharing a name stay apart.
         kind=""; case "$n" in cask:*) kind=--cask; n=${n#cask:} ;; formula:*) kind=--formula; n=${n#formula:} ;; esac
-        run_cmd "$(fill update brew "greedy=${MACUP_BREW_GREEDY:+--greedy}" "kind=$kind" "name=$(q $n)")" \
-          2>&1 | tee "$capture"; bstatus=$pipestatus[1]
+        cmd=$(fill update brew "greedy=${MACUP_BREW_GREEDY:+--greedy}" "kind=$kind" "name=$(q $n)")
+        run_cmd "$cmd" 2>&1 | tee "$capture"; bstatus=$pipestatus[1]
         if (( bstatus != 0 )) && grep -q "is not there" "$capture"; then
           echo "→ app is missing from disk, reinstalling the cask instead"
           run brew reinstall --cask -- "$n" || rc=1
-        elif (( bstatus != 0 )); then rc=1; fi
+        elif (( bstatus != 0 )); then
+          rc=1
+          # Some casks run part of their upgrade through sudo, and sudo will only ask for a password in
+          # a terminal. Homebrew has already put the old version back; say how to finish the job.
+          grep -q "a terminal is required to read the password" "$capture" \
+            && echo "→ $n needs your administrator password, which sudo only asks for in a terminal. Run it in Terminal: $cmd"
+        fi
       done
       exit $rc
     else

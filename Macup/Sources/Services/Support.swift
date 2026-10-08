@@ -41,6 +41,25 @@ enum Support {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
+
+    /// The script that runs a command in a terminal window: it shows the command, runs it, and deletes
+    /// itself, so nothing is left behind in the temporary folder.
+    static func terminalScript(_ command: String, title: String) -> String {
+        let shown = "'" + "$ \(command)".replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "#!/bin/zsh\n# \(title), opened by MacUp.\nrm -f -- \"$0\"\nprint -r -- \(shown)\n\(command)\n"
+    }
+
+    /// Runs a command in a new window of whichever terminal opens .command files, Terminal by default.
+    /// For steps that need a person at a terminal: sudo asks for the password there, not MacUp.
+    static func runInTerminal(_ command: String, title: String) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacUp-\(UUID().uuidString.prefix(8)).command")
+        do {
+            try terminalScript(command, title: title).write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        } catch { return }
+        NSWorkspace.shared.open(url)
+    }
 }
 
 extension ManagerReport {

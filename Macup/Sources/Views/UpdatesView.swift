@@ -138,6 +138,9 @@ struct PackageRow: View {
             if pkg.manager.supportsRemoval {
                 Button("Remove \(pkg.name)…") { confirmAndRemove() }
             }
+            if store.updatesInTerminal(pkg) {
+                Button("Copy Update Command") { Task { await store.copyUpdateCommand(pkg) } }
+            }
             if let failure = store.failure(for: pkg) {
                 Button("Copy Error") {
                     Support.copy(
@@ -186,6 +189,10 @@ struct PackageRow: View {
             Spacer()
             if store.isUpgrading(pkg) {
                 ProgressView().controlSize(.small)
+            } else if store.updatesInTerminal(pkg) {
+                Button("Update in Terminal") { Task { await store.upgrade(pkg) } }
+                    .controlSize(.small)
+                    .help("Needs your administrator password, which Homebrew can only ask for in Terminal")
             } else if let failure = store.failure(for: pkg) {
                 Button {
                     store.reveal(pkg)

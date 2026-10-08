@@ -255,6 +255,9 @@ struct PanelRow: View {
                     if UpdateStore.confirmRemoval(of: pkg) { Task { await store.remove(pkg) } }
                 }
             }
+            if store.updatesInTerminal(pkg) {
+                Button("Copy Update Command") { Task { await store.copyUpdateCommand(pkg) } }
+            }
             if let failure = store.failure(for: pkg) {
                 Button("Retry Update") { Task { await store.upgrade(pkg) } }
                 Button("Copy Error") {
@@ -278,6 +281,18 @@ struct PanelRow: View {
     @ViewBuilder private var trailing: some View {
         if store.isUpgrading(pkg) {
             ProgressView().controlSize(.small)
+        } else if store.updatesInTerminal(pkg) {
+            Button {
+                Task { await store.upgrade(pkg) }
+            } label: {
+                Image(systemName: "terminal").font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .help(
+                "Needs your administrator password, which Homebrew can only ask for in Terminal. "
+                    + "Click to update it there."
+            )
+            .accessibilityLabel("Update \(pkg.name) in Terminal")
         } else if let failure = store.failure(for: pkg) {
             Button {
                 store.reveal(pkg)

@@ -191,6 +191,91 @@ check "brew: and lists what is outdated from the data on disk" "$out" "P	brew	jq
 (( took < 10 )) && ok "brew: the stalled refresh is stopped, not waited out (${took}s)" \
   || bad "brew: the stalled refresh is stopped, not waited out" "took ${took}s"
 
+# --- Homebrew: casks whose upgrade needs sudo are marked, since sudo has no terminal to ask in -------
+leftover=$(mktemp -d)/com.example.helper
+: > "$leftover"
+stub brewadmin '[[ "$1" == "--version" ]] && { echo "Homebrew 9.9.9"; exit 0 }
+[[ "$1" == "--prefix" ]] && { echo /nonexistent; exit 0 }
+if [[ "$1" == info ]]; then cat <<JSON
+{
+  "formulae": [],
+  "casks": [
+    {
+      "token": "withpkg",
+      "full_token": "withpkg",
+      "artifacts": [
+        { "uninstall": [ { "pkgutil": "com.example.withpkg" } ] },
+        { "pkg": [ "WithPkg.pkg" ] }
+      ]
+    },
+    {
+      "token": "helper",
+      "full_token": "some/tap/helper",
+      "artifacts": [
+        {
+          "uninstall": [
+            {
+              "launchctl": "com.example.not-installed",
+              "delete": [
+                "/Library/PrivilegedHelperTools/com.example.not-there",
+                "$LEFTOVER"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "token": "plain",
+      "full_token": "plain",
+      "artifacts": [
+        {
+          "uninstall": [
+            {
+              "launchctl": [
+                "com.example.plain.agent-not-installed"
+              ],
+              "delete": "~/Library/Plain"
+            }
+          ]
+        },
+        { "app": [ "Plain.app" ] },
+        {
+          "zap": [
+            {
+              "pkgutil": "com.example.plain",
+              "delete": "/Library/Plain"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+JSON
+exit 0; fi
+cat <<JSON
+{
+  "formulae": [
+    {
+      "name": "jq",
+      "installed_versions": [
+        "1.6"
+      ],
+      "current_version": "1.7.1"
+    }
+  ],
+  "casks": [
+$(for c in withpkg some/tap/helper plain; do printf "    {\n      \"name\": \"%s\",\n      \"installed_versions\": [\n        \"1.0\"\n      ],\n      \"current_version\": \"2.0\"\n    },\n" "$c"; done)
+  ]
+}
+JSON' brew
+out=$(run brewadmin LEFTOVER="$leftover" zsh "$SCAN" brew 2>/dev/null)
+check "brew: a cask that installs a .pkg needs a password" "$out" "P	brew	withpkg	1.0	2.0	cask	admin"
+check "brew: so does one with a system file to remove" "$out" "P	brew	some/tap/helper	1.0	2.0	cask	admin"
+check "brew: a cask whose sudo steps are only in zap, or not on this Mac, does not" "$out" "P	brew	plain	1.0	2.0	cask		"
+check "brew: and formulae are never marked" "$out" "P	brew	jq	1.6	1.7.1	formula		"
+
 # --- macOS: a busy update daemon falls back to the list macOS keeps in its preferences -------------
 stub sustall 'sleep 30' softwareupdate
 plist=$(mktemp -d)/su.plist

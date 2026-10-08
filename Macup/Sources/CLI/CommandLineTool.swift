@@ -80,14 +80,19 @@ enum CommandLineTool {
         for manager in off { print("\(manager.title) is turned off in MacUp's settings, so it is left alone.") }
 
         var targets = request.managers.isEmpty ? Manager.allCases : request.managers.filter { !off.contains($0) }
+        var pool = request.now ? store.visible : store.eligible
         // Nobody may be there to type a password: cron, launchd, a script with its input redirected.
         if request.skipAdmin || isatty(STDIN_FILENO) == 0 {
             for manager in targets where store.needsAdmin(manager) {
                 print("Skipping \(manager.title): it needs an administrator password.")
             }
             targets.removeAll { store.needsAdmin($0) }
+            // A cask that runs part of its upgrade through sudo asks for the password the same way.
+            for pkg in pool where targets.contains(pkg.manager) && store.needsAdmin(pkg) {
+                print("Skipping \(pkg.name): it needs an administrator password.")
+            }
+            pool.removeAll { store.needsAdmin($0) }
         }
-        let pool = request.now ? store.visible : store.eligible
         // macOS updates are a hand-off to System Settings, run only when asked for by name.
         let candidates = pool.filter {
             targets.contains($0.manager) && (!$0.manager.opensExternally || request.managers == [$0.manager])

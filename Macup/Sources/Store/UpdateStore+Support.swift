@@ -71,9 +71,10 @@ extension UpdateStore {
     var selfUpdateCount: Int { selfCaskUpdate == nil ? 0 : 1 }
     var badgeCount: Int { eligible.count + selfUpdateCount }
 
-    /// What "Update All" will actually run (system updates are a hand-off to System Settings).
+    /// What "Update All" will actually run (system updates are a hand-off to System Settings, and casks
+    /// that need sudo are left for Terminal).
     var updatableCount: Int {
-        eligible.filter { !$0.manager.opensExternally }.count + selfUpdateCount
+        eligible.filter { !$0.manager.opensExternally && !updatesInTerminal($0) }.count + selfUpdateCount
     }
 
     /// True while this specific package is being upgraded (a manager-wide lock also covers rustup toolchains).
@@ -156,6 +157,7 @@ extension UpdateStore {
 
     /// The most informative lines of a failed command: error lines if any, otherwise the last few lines.
     nonisolated static func errorSummary(_ output: String, status: Int32) -> String {
+        if output.contains(sudoWithoutTerminal) { return needsTerminalFailure }
         let lines = output.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && !$0.hasPrefix("$ ") }
         let errors = lines.filter { $0.localizedCaseInsensitiveContains("error") }

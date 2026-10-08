@@ -183,6 +183,21 @@ final class CommandLineToolTests: StubScriptCase {
         XCTAssertEqual(store.history.records.map(\.package), ["lodash"], "the gem would need a password")
     }
 
+    func testACaskThatNeedsSudoIsSkippedWithoutSomeoneThereAndRunWithThem() async {
+        var cask = pkg("docker-desktop", manager: .brew, kind: "cask")
+        cask.extra = "admin"
+        let store = store(commandLine: true)
+        store.loadFixture(reports: [], packages: [cask, pkg("lodash")], log: "")
+
+        await _ = run(.init(command: .upgrade, skipAdmin: true), store)
+        XCTAssertEqual(store.history.records.map(\.package), ["lodash"], "sudo would ask for a password")
+
+        // In a terminal, sudo asks there itself, so the command line runs it like anything else.
+        store.loadFixture(reports: [], packages: [cask], log: "")
+        await store.upgrade(cask)
+        XCTAssertTrue(store.history.records.contains { $0.package == "docker-desktop" && $0.succeeded })
+    }
+
     func testMacOSUpdatesOnlyWhenAskedForByName() async {
         let store = store(commandLine: true)  // macOS updates are shown in these tests
         store.loadFixture(reports: [], packages: [pkg("Sequoia", manager: .macos), pkg("lodash")], log: "")

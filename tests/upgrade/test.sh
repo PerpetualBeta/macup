@@ -70,5 +70,18 @@ listed=$(Macup/Resources/Scripts/macup-scan.sh --commands 2>&1)
 [[ "$listed" == *$'check\tnpm\tnpm outdated -g --json'* ]] && ok "and each line is phase, manager, command" \
   || bad "and each line is phase, manager, command" "got: ${listed//$'\n'/ | }"
 
+# --- a cask whose upgrade needs sudo: the app hands the dry-run command to Terminal ----------------
+is "a cask's command is the one Terminal is given" 'brew upgrade --cask -- docker-desktop' -- brew cask:docker-desktop
+# Run for real, sudo refuses for want of a terminal, and the log says how to finish the job.
+stubs=$(mktemp -d "${TMPDIR:-/tmp}/macup-up.XXXXXX")
+printf '#!/bin/zsh\n%s\n' 'echo "sudo: a terminal is required to read the password; either use the -S option" >&2
+echo "Error: docker-desktop: Failure while executing; /usr/bin/sudo -E -- /bin/rm exited with 1." >&2; exit 1' \
+  > "$stubs/brew"; chmod +x "$stubs/brew"
+got=$(MACUP_USER_PATH="$stubs" "$UP" brew cask:docker-desktop 2>&1); rc=$?
+(( rc == 1 )) && ok "a cask refused sudo still fails" || bad "a cask refused sudo still fails" "exit $rc"
+[[ "$got" == *"Run it in Terminal: brew upgrade --cask -- docker-desktop"* ]] \
+  && ok "and says how to finish it in Terminal" || bad "and says how to finish it in Terminal" "got: ${got//$'\n'/ | }"
+rm -rf "$stubs"
+
 print -P "\n%F{blue}upgrade script:%f $pass passed, $fail failed"
 (( fail == 0 ))

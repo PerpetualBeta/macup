@@ -9,6 +9,7 @@
 #       receipt; the install folder/binary modification time for the others), or empty if unknown.
 #   kind is prefixed with "system-" when the package lives in a location owned by macOS
 #   (system Ruby gems, the Xcode Python, a root-owned npm prefix): those should not be changed.
+#   extra is "admin" for a Homebrew cask whose upgrade needs sudo, which only works in a terminal.
 # Usage: macup-scan.sh [manager ...]   (no args = all managers)
 set -u
 setopt NULL_GLOB EXTENDED_GLOB 2>/dev/null
@@ -124,6 +125,43 @@ errline() {
 # Only used on JSON we know is pretty-printed one key per line (brew, npm, pip).
 jstr() { sed -nE "s/^[[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" | head -n1; }
 
+# brew_admin_casks <cask ...> — the casks whose upgrade runs part of itself through sudo: an installer
+# package, a kernel extension, a package receipt to forget, an uninstall script run as root, or a system
+# launch service or file outside the home folder that is there to remove. Homebrew asks sudo for those,
+# and sudo cannot ask for a password without a terminal, which MacUp does not have, so the upgrade fails
+# halfway. Read from each cask's own definition; `zap` is skipped, since an upgrade never runs it.
+brew_admin_casks() {
+  local what token value
+  local -a found hit
+  brew info --cask --json=v2 -- "$@" 2>/dev/null | awk -v OFS='\t' '
+    BEGIN { zap = -1; list = "" }
+    { ind = match($0, /[^ ]/) - 1 }
+    /^      "full_token": "/ { t = $0; sub(/^ *"full_token": "/, "", t); sub(/".*/, "", t); zap = -1; list = ""; next }
+    zap >= 0 { if (ind == zap && $0 ~ /^ *\]/) zap = -1; next }
+    /"zap": \[/ { zap = ind; next }
+    list != "" {
+      if (ind == at && $0 ~ /^ *\]/) list = ""
+      else if (match($0, /"[^"]*"/)) print list, t, substr($0, RSTART + 1, RLENGTH - 2)
+      next }
+    /"launchctl": \[/ { list = "L"; at = ind; next }
+    /"delete": \[/    { list = "D"; at = ind; next }
+    /"(launchctl|delete)": "/ {
+      v = $0; sub(/^ *"[a-z]*": "/, "", v); sub(/".*/, "", v)
+      print ($0 ~ /"launchctl"/ ? "L" : "D"), t, v; next }
+    /"(pkg|installer|pkgutil|kext)": / || /"sudo": true/ { print "F", t, "" }' | \
+  while IFS=$'\t' read -r what token value; do
+    case "$what" in
+      F) found+=("$token") ;;
+      # A launch service is only system-wide, and so only needs sudo, once its plist is in /Library.
+      L) [[ -e "/Library/LaunchDaemons/$value.plist" || -e "/Library/LaunchAgents/$value.plist" ]] && found+=("$token") ;;
+      # Homebrew only removes what is there; /Applications is writable by an administrator without sudo.
+      D) [[ "$value" == /* && "$value" != /Applications/* ]] || continue
+         hit=(${~value}(N)); (( ${#hit} )) && found+=("$token") ;;
+    esac
+  done
+  (( ${#found} )) && print -rl -- "${(u)found[@]}"
+}
+
 scan_brew() {
   have brew || { header brew missing; return; }
   local greedy=""; [[ "${MACUP_BREW_GREEDY:-0}" == 1 ]] && greedy="--greedy"
@@ -136,6 +174,9 @@ scan_brew() {
   (( rc == 0 )) || { header brew error "brew outdated failed$(vtag brew): $(errline "$err")"; return; }
   header brew ok
   local prefix; prefix=$(brew --prefix 2>/dev/null)
+  local -a casks admin
+  casks=(${(f)"$(printf '%s\n' "$out" | sed -n '/"casks"/,$p' | sed -nE 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')"})
+  (( ${#casks} )) && admin=(${(f)"$(brew_admin_casks "${casks[@]}")"})
   brew_time() {  # $1 kind, $2 name, $3 installed version
     local n=${2##*/}
     if [[ "$1" == cask ]]; then mtime "$prefix/Caskroom/$n/$3"
@@ -151,7 +192,9 @@ scan_brew() {
       *'"installed_versions"'*) in_inst=1; installed="" ;;
       *'"current_version"'*)
         latest=$(printf '%s\n' "$line" | jstr current_version)
-        [[ -n "$name" && -n "$latest" ]] && pkg brew "$name" "${installed:-?}" "$latest" "$section" "" "$(brew_time "$section" "$name" "$installed")"
+        # extra is "admin" for a cask whose upgrade needs sudo, which MacUp leaves for Terminal.
+        [[ -n "$name" && -n "$latest" ]] && pkg brew "$name" "${installed:-?}" "$latest" "$section" \
+          "$([[ "$section" == cask ]] && (( ${admin[(Ie)$name]} )) && print admin)" "$(brew_time "$section" "$name" "$installed")"
         name="" installed="" latest="" ;;
       *)
         if (( in_inst )); then

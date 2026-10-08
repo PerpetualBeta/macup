@@ -120,6 +120,10 @@ struct OutdatedPackage: Identifiable, Equatable, Codable, Hashable {
     var isSystem: Bool { kind.hasPrefix("system-") }
     /// Kind without the "system-" marker, e.g. "cask", "gem".
     var baseKind: String { isSystem ? String(kind.dropFirst("system-".count)) : kind }
+    /// A Homebrew cask whose upgrade runs part of itself through sudo (an installer package, a system
+    /// launch service or file to remove). sudo only asks for a password in a terminal, so the scan marks
+    /// these with "admin" in `extra`.
+    var needsAdmin: Bool { manager == .brew && extra == "admin" }
     var isSecurity: Bool { !advisories.isEmpty }
     var needsLatest: Bool { latest == "?" }
 

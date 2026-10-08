@@ -35,6 +35,12 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(pkg(.gem, "rails", kind: "gem").isSystem)
     }
 
+    func testOnlyACaskTheScanMarkedNeedsAPassword() {
+        XCTAssertTrue(pkg(.brew, "docker-desktop", kind: "cask", extra: "admin").needsAdmin)
+        XCTAssertFalse(pkg(.brew, "ghostty", kind: "cask").needsAdmin)
+        XCTAssertFalse(pkg(.mas, "admin", extra: "admin").needsAdmin, "extra means something else elsewhere")
+    }
+
     func testUpgradeArgumentPerManager() {
         XCTAssertEqual(pkg(.npm, "lodash").upgradeArgument, "lodash")
         XCTAssertEqual(pkg(.brew, "jq", kind: "formula").upgradeArgument, "formula:jq")

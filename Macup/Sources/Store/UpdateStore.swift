@@ -234,6 +234,8 @@ final class UpdateStore {
     // MARK: Upgrading
 
     func upgrade(_ pkg: OutdatedPackage) async {
+        // A terminal run has a terminal for sudo to ask in, so only the app hands these over.
+        if updatesInTerminal(pkg), !isCommandLine { return await updateInTerminal(pkg) }
         guard !upgrading.contains(pkg.id), !upgrading.contains(pkg.manager.rawValue) else { return }
         upgrading.insert(pkg.id)
         await runUpgrade(manager: pkg.manager, packages: [pkg])
@@ -258,10 +260,10 @@ final class UpdateStore {
         await updateSelf(quiet: true)
     }
 
-    /// Upgrades one package at a time so each row gets its own result, then rescans once. What is
-    /// upgraded is what is ready, unless `candidates` says otherwise (the command line's `--now`).
+    /// Upgrades one package at a time so each row gets its own result, then rescans once. What is upgraded
+    /// is what is ready bar casks that need sudo (left for Terminal), or `candidates` (the command line's).
     func upgradeAll(managers: [Manager], candidates: [OutdatedPackage]? = nil) async {
-        let grouped = Dictionary(grouping: candidates ?? eligible, by: \.manager)
+        let grouped = Dictionary(grouping: candidates ?? eligible.filter { !updatesInTerminal($0) }, by: \.manager)
         for manager in managers where !(manager.opensExternally && managers.count > 1) {
             guard let items = grouped[manager], !upgrading.contains(manager.rawValue) else { continue }
             upgrading.insert(manager.rawValue)
@@ -295,7 +297,7 @@ final class UpdateStore {
             guard let cask = selfCaskUpdate else { return }
             // Replacing the app unasked deserves the same settling delay as everything else, and the
             // cask goes through Homebrew, so it is subject to the same password rule.
-            if unattended, !isEligible(cask) || needsAdmin(.brew) { return }
+            if unattended, !isEligible(cask) || needsAdmin(cask) { return }
             if let selfUpdateOverride { return await selfUpdateOverride(quiet) }
             await upgrade(cask)
         case .direct:
@@ -467,7 +469,7 @@ final class UpdateStore {
         return false
     }
 
-    private func appendLog(_ s: String) {
+    func appendLog(_ s: String) {
         logSink?(s)
         log.append(s)
         if log.count > 200_000 { log = String(log.suffix(150_000)) }
