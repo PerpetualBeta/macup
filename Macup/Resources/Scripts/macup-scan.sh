@@ -62,11 +62,12 @@ if stat -f %m / >/dev/null 2>&1; then mtime() { [[ -e "$1" ]] && stat -f %m "$1"
 else mtime() { [[ -e "$1" ]] && stat -c %Y "$1" 2>/dev/null; }; fi
 # First dotted version number in a tool's --version output. A failing manager asks for this twice,
 # once for the error message and once for the header, and a cold tool can take a second to answer,
-# so the answer is remembered for the rest of the scan.
+# so the answer is remembered for the rest of the scan. It is also asked when a manager has just timed
+# out, from the main shell where no deadline applies, so a tool that hangs on --version too is cut short.
 typeset -A _version_cache
 self_version() {
   [[ -n ${_version_cache[$1]+set} ]] && { print -r -- "${_version_cache[$1]}"; return }
-  local v; v=$("$1" --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)
+  local v; v=$(bounded 5 "${(q)1} --version" 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)
   _version_cache[$1]=$v
   print -r -- "$v"
 }
@@ -606,11 +607,13 @@ for m in "${managers[@]}"; do
     trap - EXIT TERM INT HUP   # subshells inherit the cleanup trap; only the main shell may remove $tmp
     ( trap - EXIT TERM INT HUP; "scan_$m" > "$tmp/$m.part" 2>/dev/null ) &
     worker=$!
-    # The watchdog kills the manager process itself, not only the worker shell, and never holds our stdout.
-    ( trap - EXIT TERM INT HUP; sleep "$deadline"; pkill -TERM -P $worker 2>/dev/null; kill -TERM $worker 2>/dev/null && : > "$tmp/$m.timeout" ) >/dev/null 2>&1 &
+    # The watchdog stops the manager and everything it started (brew's git and curl, a stub's sleep),
+    # not only the worker shell, and never holds our stdout.
+    ( trap - EXIT TERM INT HUP; sleep "$deadline"
+      kill -0 $worker 2>/dev/null && { : > "$tmp/$m.timeout"; kill_tree $worker; } ) >/dev/null 2>&1 &
     watchdog=$!
     wait $worker 2>/dev/null
-    pkill -P $watchdog 2>/dev/null; kill $watchdog 2>/dev/null; wait $watchdog 2>/dev/null
+    kill_tree $watchdog; wait $watchdog 2>/dev/null
     mv -f "$tmp/$m.part" "$tmp/$m" 2>/dev/null
   ) &
   pids+=($!)

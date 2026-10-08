@@ -161,9 +161,29 @@ check "isolation: a failing manager still reports" "$out" "M	npm	error"
 check "isolation: the other manager is unaffected" "$out" "M	bun	ok"
 
 # --- a hung manager is stopped and reported rather than holding the whole scan ---------------------
-stub hang 'sleep 30' npm
-out=$(run hang MACUP_MANAGER_TIMEOUT=1 zsh "$SCAN" npm 2>/dev/null)
+stub hang '[[ "$1" == "--version" ]] && { echo 9.9.9; exit 0 }
+sleep 30 & print $! > "$HANG_PID"; wait' npm
+hang_pid=$(mktemp)
+started=$(date +%s)
+out=$(run hang MACUP_MANAGER_TIMEOUT=1 HANG_PID="$hang_pid" zsh "$SCAN" npm 2>/dev/null)
+took=$(( $(date +%s) - started ))
 check "a hung manager times out" "$out" "took longer than 1s and was stopped"
+(( took < 10 )) && ok "and the scan does not wait for it (${took}s)" || bad "and the scan does not wait for it" "took ${took}s"
+# What the manager started goes with it: a hung brew must not leave its git or curl running.
+child=$(<"$hang_pid")
+[[ -n "$child" ]] && ! kill -0 "$child" 2>/dev/null && ok "and what it started is stopped too" \
+  || { bad "and what it started is stopped too" "pid ${child:-?} is still running"; kill "$child" 2>/dev/null }
+rm -f "$hang_pid"
+
+# The timeout is reported with the tool's version, asked from the main shell where no deadline
+# applies. A tool that hangs on --version as well must not hold the report, and the scan, with it.
+stub hangall 'sleep 30' npm
+started=$(date +%s)
+out=$(run hangall MACUP_MANAGER_TIMEOUT=1 zsh "$SCAN" npm 2>/dev/null)
+took=$(( $(date +%s) - started ))
+check "a tool that hangs on --version too still times out" "$out" "took longer than 1s and was stopped"
+(( took < 10 )) && ok "and is reported without waiting for its version (${took}s)" \
+  || bad "and is reported without waiting for its version" "took ${took}s"
 
 # --- Homebrew: a refresh that stalls is dropped, and the packages on disk still answer -------------
 stub brewstall '[[ "$1" == "--version" ]] && { echo "Homebrew 9.9.9"; exit 0 }
